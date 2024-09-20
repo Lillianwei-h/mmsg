@@ -73,7 +73,8 @@ def run_interleaved_generation(
         ).to(model.device, dtype=model.dtype)
     else:
         raise ValueError(f"Invalid inference_id: {inference_mode}")
-
+    
+    # torch.save(inputs, 'input.pt')
     logger.info("Generating response...")
     with torch.inference_mode():
         output_token_ids_batch = model.generate(
@@ -82,7 +83,15 @@ def run_interleaved_generation(
             max_new_tokens=max_new_tokens,
             do_sample=True,
         )
+    
+    # torch.save(output_token_ids_batch, 'output.pt')
     logger.info("Finished generation.")
+
+    new_input_ids = output_token_ids_batch.squeeze(1)
+    with torch.no_grad():
+        attention_output = model.forward(input_ids=new_input_ids, output_attentions=True, return_dict=True)
+
+    torch.save(attention_output, 'attention.pt')
 
     output_token_ids_batch = output_token_ids_batch.to(dtype=inputs["input_ids"].dtype).detach().cpu().numpy()
 
@@ -128,7 +137,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "-i",
         "--inference_mode",
-        choices=["text-to-image", "text-image-to-image", "multi-image-to-image"],
+        choices=["text-to-image", "text-image-to-image", "multi-image-to-image", "text-to-interleaved-text-image"],
         required=False,
         default="text-to-image",
         help="",
@@ -141,22 +150,22 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
         help="The prompt for generation. Will be appended by <image> or <image><image> if images are provided.",
     )
-    # parser.add_argument(
-    #     "-i1",
-    #     "--image_1_path",
-    #     type=str,
-    #     required=False,
-    #     default=None,
-    #     help="The path to the first image to be used for generation.",
-    # )
-    # parser.add_argument(
-    #     "-i2",
-    #     "--image_2_path",
-    #     type=str,
-    #     required=False,
-    #     default=None,
-    #     help="The path to the second image to be used for generation.",
-    # )
+    parser.add_argument(
+        "-i1",
+        "--image_1_path",
+        type=str,
+        required=False,
+        default=None,
+        help="The path to the first image to be used for generation.",
+    )
+    parser.add_argument(
+        "-i2",
+        "--image_2_path",
+        type=str,
+        required=False,
+        default=None,
+        help="The path to the second image to be used for generation.",
+    )
     parser.add_argument(
         "-n",
         "--max_new_tokens",
@@ -170,7 +179,7 @@ def parse_arguments() -> argparse.Namespace:
         "--fast",
         type=int,
         required=False,
-        default=40,
+        default=False,
         help="Whether to convert the model to bfloat16 & use Flash Attention 2",
     )
     parser.add_argument(

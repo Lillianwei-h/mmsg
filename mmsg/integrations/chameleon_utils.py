@@ -1,6 +1,7 @@
 import os
 import uuid
 from typing import TYPE_CHECKING, List, Literal, Optional, Tuple, TypedDict, Union
+from torchvision.transforms import ToPILImage
 
 import torch
 from typing_extensions import NotRequired
@@ -97,7 +98,7 @@ def build_response_from_segments(
     image_tokens_tensor = torch.tensor(image_tokens_list, device=model.device)
     pixel_values = model.decode_image_tokens(image_tokens_tensor)
     images = processor.postprocess_pixel_values(
-        pixel_values.float().detach().cpu().numpy()
+        pixel_values.float().detach().cpu()
     )
 
     response: ResponseDict = {"text": "", "images": []}
@@ -106,7 +107,9 @@ def build_response_from_segments(
             response["text"] += text_str_list.pop(0)
         else:
             response["text"] += "<image>"
-            image = images.pop(0)
+            # print(images)
+            to_pil = ToPILImage()
+            image = to_pil(images[0])
             image_data: ImageDataDict = {
                 "base64_str": f"data:image/png;base64,{pil_to_base64(image)}"
             }

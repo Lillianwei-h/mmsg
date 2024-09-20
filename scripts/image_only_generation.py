@@ -216,7 +216,7 @@ def parse_arguments() -> argparse.Namespace:
         "--fast",
         type=int,
         required=False,
-        default=40,
+        default=False,
         help="Whether to convert the model to bfloat16 & use Flash Attention 2",
     )
     parser.add_argument(
