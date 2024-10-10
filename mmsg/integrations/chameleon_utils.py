@@ -92,36 +92,45 @@ def build_response_from_segments(
         for modality, token_ids in segments
         if modality == "image"
     ]
-
+    
     text_str_list = processor.batch_decode(text_tokens_list, skip_special_tokens=True)
+    
+    if len(image_tokens_list)>0:
+        image_tokens_tensor = torch.tensor(image_tokens_list, device=model.device)
+        pixel_values = model.decode_image_tokens(image_tokens_tensor)
+        image_list = processor.postprocess_pixel_values(
+            pixel_values.float().detach().cpu()
+        )
 
-    image_tokens_tensor = torch.tensor(image_tokens_list, device=model.device)
-    pixel_values = model.decode_image_tokens(image_tokens_tensor)
-    images = processor.postprocess_pixel_values(
-        pixel_values.float().detach().cpu()
-    )
-
-    response: ResponseDict = {"text": "", "images": []}
+    response = []
+    text = []
+    images = []
+    image_no = 0
     for modality, _ in segments:
         if modality == "text":
-            response["text"] += text_str_list.pop(0)
+            text_origin = text_str_list.pop(0)
+            if text_origin!="":
+                text.append(text_origin)
         else:
-            response["text"] += "<image>"
-            # print(images)
             to_pil = ToPILImage()
-            image = to_pil(images[0])
-            image_data: ImageDataDict = {
-                "base64_str": f"data:image/png;base64,{pil_to_base64(image)}"
-            }
+            image = to_pil(image_list[image_no])
+            image_no+=1
 
             if outputs_dir is not None:
-                if not os.path.exists(f"{outputs_dir}/images"):
-                    os.mkdir(f"{outputs_dir}/images")
-                image_save_path = f"{outputs_dir}/images/{str(uuid.uuid4())}.png"
+                if not os.path.exists(f"{outputs_dir}/generated_images"):
+                    os.mkdir(f"{outputs_dir}/generated_images")
+                image_save_path = f"{outputs_dir}/generated_images/{str(uuid.uuid4())}.png"
                 image.save(image_save_path)
-                image_data["save_path"] = image_save_path
+                images.append(image_save_path)
 
-            response["images"].append(image_data)
+    for i in range(max(len(text),len(images))):
+        content = {"text":None,"image":None}
+        if i < len(text):
+            content["text"] = text[i]
+        if i < len(images):
+            content["image"] = images[i]
+        response.append(content)
+
     return response
 
 

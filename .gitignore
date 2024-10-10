@@ -3,3 +3,7 @@
 dist/
 mmsg/_version.py
 mmsg.egg-info
+output*
+media*
+eval_results*
+*workspace*
