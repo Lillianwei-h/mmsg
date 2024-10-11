@@ -42,6 +42,10 @@ test = [
     "term-image",
     "pre-commit",
     "transformers @ git+https://github.com/leloykun/transformers@fc--anole",
+    "flash_attn",
+    "accelerate",
+    "torchvision",
+    "matplotlib",
     # "transformers",
 ]
 

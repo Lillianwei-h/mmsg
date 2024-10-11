@@ -14,6 +14,7 @@ from mmsg.integrations.chameleon_utils import postprocess_token_sequence
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
+from peft import PeftModel
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -140,6 +141,9 @@ model = ChameleonForConditionalGeneration.from_pretrained(
     token=os.environ.get("HF_TOKEN"),
     attn_implementation="eager",
 )
+
+peft_model_path = ""
+model = PeftModel.from_pretrained(model, peft_model_path)
 
 processor = ChameleonProcessor.from_pretrained(
     "leloy/Anole-7b-v0.1-hf",

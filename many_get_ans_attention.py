@@ -7,13 +7,14 @@ from transformers import (
 )
 from mmsg.utils import load_image
 from prompts import get_ask_prompt
-from dataset import get_question_dataset
+from dataset import get_question_answer_dataset
 from tqdm import tqdm
 import json
 from mmsg.integrations.chameleon_utils import postprocess_token_sequence
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
+from peft import PeftModel
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -27,7 +28,7 @@ def run_interleaved_generation(
     prompt: Optional[str] = None,
     image_paths: list = [],
     max_new_tokens: int = 3000,
-    outputs_dir: str = "./outputs_lora",
+    outputs_dir: str = "./outputs",
     attention_dir: str = "attentions",
 ):
     images = [load_image(image_path) for image_path in image_paths]
@@ -44,7 +45,7 @@ def run_interleaved_generation(
         output_token_ids_batch = model.generate(
             **inputs,
             multimodal_generation_mode="interleaved-text-image",
-            max_new_tokens=max_new_tokens,
+            max_new_tokens=1,
             do_sample=True,
         )
     logger.info("Finished generation.")
@@ -59,9 +60,8 @@ def run_interleaved_generation(
     with torch.no_grad():
         attention_output = model.forward(input_ids=new_input_ids, output_attentions=True, return_dict=True)
     attention_weights = attention_output['attentions']
-    os.makedirs(f'{full_outputs_dir}/weights', exist_ok=True)
-    torch.save(attention_weights, f'{full_outputs_dir}/weights/{data_id}.pt')
-
+    # os.makedirs(f'{full_outputs_dir}/weights', exist_ok=True)
+    # torch.save(attention_weights, f'{full_outputs_dir}/weights/{data_id}.pt')
     average_attention_per_layer = []
     for layer_attention in attention_weights:
         layer_attention_numpy = layer_attention.cpu().numpy()
@@ -77,15 +77,8 @@ def run_interleaved_generation(
     plt.tight_layout()
     plt.savefig(attention_path, bbox_inches='tight')
     plt.close()
-    
-    output_token_ids_batch = output_token_ids_batch.to(dtype=inputs["input_ids"].dtype).detach().cpu().numpy()
 
-    response_token_ids = output_token_ids_batch[0][len(inputs["input_ids"][0]) :]
-    response = postprocess_token_sequence(
-        response_token_ids, model, processor, full_outputs_dir, validate=True
-    )
-    torch.cuda.empty_cache()
-    return response, attention_path
+    return attention_path
 
 def run_text_only_generation(
     prompt: Optional[str] = None,
@@ -126,14 +119,6 @@ def run_text_only_generation(
 
 torch.set_printoptions(threshold=10_000)
 
-# model = ChameleonForConditionalGeneration.from_pretrained(
-#     "leloy/Anole-7b-v0.1-hf",
-#     torch_dtype=torch.bfloat16,
-#     low_cpu_mem_usage=True,
-#     attn_implementation="flash_attention_2",
-#     device_map="auto",
-#     token=os.environ.get("HF_TOKEN"),
-# )
 model = ChameleonForConditionalGeneration.from_pretrained(
     "leloy/Anole-7b-v0.1-hf",
     device_map="auto",
@@ -141,45 +126,28 @@ model = ChameleonForConditionalGeneration.from_pretrained(
     attn_implementation="eager",
 )
 
+peft_model_path = "../ManyAlignment/mm_training/outputs/ft/Chameleon/dpo_Lora_radn-64-128-0.05_24-10-11-08_00_37_XP3/checkpoint-last/adapter"
+model = PeftModel.from_pretrained(model, peft_model_path)
+
 processor = ChameleonProcessor.from_pretrained(
     "leloy/Anole-7b-v0.1-hf",
     token=os.environ.get("HF_TOKEN"),
 )
-
-output_dir = "./outputs_lora"
-output_file = "response.json"
-
-os.makedirs(output_dir,exist_ok=True)
-output_path = os.path.join(output_dir,output_file)
+os.makedirs("./outputs",exist_ok=True)
 
 for dataset in ['vist']:
-    processed_data = get_question_dataset(dataset)
-    system_prompt = get_ask_prompt(dataset)
-    if os.path.exists(output_path):
-        print("Find previous response!")
-        with open (output_path,'r') as f:
-            processed_data = json.load(f)
+    processed_data = get_question_answer_dataset(dataset,"./outputs","response.json")
+
     for d in tqdm(processed_data):
-        if "answer" in d:
-            continue
         id = d['id']
-        question = d['question_text']
+
+        prompt = d['text']
         images = d['images']
-        prompt = system_prompt.format(question=question)
         
-        response, attention_path = run_interleaved_generation(
+        attention_path = run_interleaved_generation(
             data_id=id,
             prompt=prompt,
             image_paths=images,
-            outputs_dir = output_dir
+            outputs_dir = "./outputs",
+            attention_dir = "dpo_attentions"
         )
-        d["answer"] = response
-        d["attention"] = attention_path
-        d.pop('question_text')
-        d.pop('images')
-        d['model'] = "anole"
-        with open(output_path,'w') as f:
-            json.dump(processed_data, f, indent=4)
-
-    with open(output_path,'w') as f:
-        json.dump(processed_data, f, indent=4)

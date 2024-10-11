@@ -1,12 +1,12 @@
 import os
 import json
 import shutil
-from prompt2 import get_ask_prompt2
-SAMPLE_DATA_PATH  = "/home/zhaoyang/projects/siwei/Project/data/ManytoMany_sample"
-ALL_DATA_PATH  = "/home/zhaoyang/projects/siwei/Project/data/ManytoMany_all"
+from prompts import get_ask_prompt2,get_ask_prompt
+SAMPLE_DATA_PATH  = "../data/ManytoMany_sample"
+ALL_DATA_PATH  = "../data/Interleave-Data"
 
 def get_dataset(dataset):
-    data_path = os.path.join(SAMPLE_DATA_PATH,dataset,'eval_sample_fb.json')
+    data_path = os.path.join(SAMPLE_DATA_PATH,dataset,'eval_sample.json')
     with open(data_path, 'r') as f:
         data = json.load(f)
 
@@ -59,7 +59,7 @@ def get_dataset(dataset):
     return processed_data
 
 def get_question_dataset(dataset):
-    data_path = os.path.join(SAMPLE_DATA_PATH,dataset,'eval_sample_fb.json')
+    data_path = os.path.join(SAMPLE_DATA_PATH,dataset,'eval_sample.json')
     with open(data_path, 'r') as f:
         data = json.load(f)
 
@@ -103,19 +103,26 @@ def get_question_dataset(dataset):
 
     return processed_data
 
-def get_question_anser_dataset(dataset,filename):
-    data_path = os.path.join(ALL_DATA_PATH,dataset,f'{filename}.json')
-    with open(data_path, 'r') as f:
-        data = json.load(f)
+def get_question_answer_dpo_dataset(dataset,filename1,filename2):
+    data_path1 = os.path.join(ALL_DATA_PATH,dataset,f'{filename1}.json')
+    data_path2 = os.path.join(ALL_DATA_PATH,dataset,f'{filename2}.json')
+    with open(data_path1, 'r') as f:
+        data1 = json.load(f)
+    with open(data_path2, 'r') as f:
+        data2 = json.load(f)
 
     processed_data = []
-    for d in data:
+    for d1, d2 in zip(data1,data2):
+        assert(d1['id']==d2['id'])
+
         processed_data_dict = {}
-        id = d['id']
-        question = d['question']
+        id = d1['id']
+        question = d1['question']
+        answer1 = d1['answer']
+        answer2 = d2['answer']
+
         question_text = ""
         question_images = []
-
         for q in question:
             if q['text'] is not None:
                 question_text+="<text>"+q['text']+'\n'+"</text>"
@@ -123,31 +130,98 @@ def get_question_anser_dataset(dataset,filename):
                 image_path = os.path.join(ALL_DATA_PATH,dataset,q['image'])
                 if os.path.exists(image_path):
                     question_text+="<image>"
-                    images.append(image_path)
+                    question_images.append(image_path)
+                else:
+                    print(f"{image_path} not found!")
         system_prompt = "<text>"+get_ask_prompt2(dataset)+"</text>"
         question_text += system_prompt
 
-        question_anwer_text = question_text
-        question_anwer_images = question_images.copy()
-
-        for a in answer[:2]:
+        answer1_text  = ""
+        answer1_images = []
+        for a in answer1[:3]:
             if a['text'] is not None:
-                question_anwer_text+="<text>"+a['text']+'\n'+"</text>"
+                answer1_text+="<text>"+a['text']+'\n'+"</text>"
             if a['image'] is not None:
                 image_path = os.path.join(ALL_DATA_PATH,dataset,a['image'])
                 if os.path.exists(image_path):
-                    question_anwer_text+="<image>"
-                    question_anwer_images.append(image_path)
+                    answer1_text+="<image>"
+                    answer1_images.append(image_path)
+                else:
+                    print(f"{image_path} not found!")
+
+        answer2_text  = ""
+        answer2_images = []
+        for a in answer2[:3]:
+            if a['text'] is not None:
+                answer2_text+="<text>"+a['text']+'\n'+"</text>"
+            if a['image'] is not None:
+                image_path = os.path.join(ALL_DATA_PATH,dataset,a['image'])
+                if os.path.exists(image_path):
+                    answer2_text+="<image>"
+                    answer2_images.append(image_path)
+                else:
+                    print(f"{image_path} not found!")
+
+        processed_data_dict['id'] = id
+        processed_data_dict['question'] = question
+        processed_data_dict['answer1'] = answer1[:3]
+        processed_data_dict['answer2'] = answer2[:3]
+        processed_data_dict['answer1_file'] = filename1
+        processed_data_dict['answer2_file'] = filename2
+        processed_data_dict['question_text'] = question_text
+        processed_data_dict['answer1_text'] = answer1_text
+        processed_data_dict['answer2_text'] = answer2_text
+        processed_data_dict['question_images'] = question_images
+        processed_data_dict['answer1_images'] = answer1_images
+        processed_data_dict['answer2_images'] = answer2_images
+
+        processed_data.append(processed_data_dict)
+
+    return processed_data
+
+def get_question_answer_dataset(dataset,filedir,filename):
+    file_path = os.path.join(filedir, filename)
+    with open(file_path, 'r') as f:
+        data = json.load(f)
+
+    processed_data = []
+    for d in data:
+        processed_data_dict = {}
+        id = d['id']
+        question = d['question']
+        answer = d['answer']
+        text = ""
+        images = []
+
+        for q in question:
+            if q['text'] is not None:
+                text+=q['text']+'\n'
+            if q['image'] is not None:
+                image_path = os.path.join(filedir,q['image'])
+                if os.path.exists(image_path):
+                    text+="<image>"
+                    images.append(image_path)
+                else:
+                    print(f"{image_path} not found!")
+        system_prompt = get_ask_prompt(dataset)
+        text = system_prompt.format(question=text)
+
+        for a in answer[:3]:
+            if a['text'] is not None:
+                text+=a['text']+'\n'
+            if a['image'] is not None:
+                image_path = os.path.join(filedir,a['image'])
+                if os.path.exists(image_path):
+                    text+="<image>"
+                    images.append(image_path)
                 else:
                     print(f"{image_path} not found!")
 
         processed_data_dict['id'] = id
         processed_data_dict['question'] = question
         processed_data_dict['answer'] = answer[:2]
-        processed_data_dict['question_text'] = question_text
-        processed_data_dict['question_anwer_text'] = question_anwer_text
-        processed_data_dict['question_images'] = question_images
-        processed_data_dict['question_anwer_images'] = question_anwer_images
+        processed_data_dict['text'] = text
+        processed_data_dict['images'] = images
 
         processed_data.append(processed_data_dict)
 

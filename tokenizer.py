@@ -1,21 +1,12 @@
 import os
 from typing import Optional
 import torch
-from transformers import (
-    ChameleonForConditionalGeneration,
-    ChameleonProcessor,
-    set_seed,
-)
-from mmsg.utils import load_image
-from prompts import get_ask_prompt
-from dataset import get_question_dataset
+from transformers import ChameleonProcessor, ChameleonModel, ChameleonForConditionalGeneration
+from utils import load_image
+from dataset import get_question_answer_dpo_dataset
 from tqdm import tqdm
 import json
-from term_image.image import from_file
-from mmsg.integrations.chameleon_utils import postprocess_token_sequence
 import logging
-import numpy as np
-import matplotlib.pyplot as plt
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -27,7 +18,17 @@ logger = logging.getLogger()
 def tokenization(
     prompt: Optional[str] = None,
     image_paths: list = [],
-) -> str:
+):
+
+    if len(image_paths) == 0:
+        inputs = processor(
+            text=prompt,
+            padding=True,
+            return_tensors="pt",
+            return_for_text_completion=True,
+        ).to(model.device, dtype=model.dtype)
+        return inputs["input_ids"]
+
     images = [load_image(image_path) for image_path in image_paths]
 
     # self.image_token = <image> 8711
@@ -40,13 +41,20 @@ def tokenization(
         padding=True,
         return_tensors="pt",
         return_for_text_completion=True,
-    )
-    token_ids = inputs["input_ids"]
-    return token_ids
+    ).to(model.device, dtype=model.dtype)
+    combine_ids = model.combine_ids(inputs["pixel_values"],inputs["input_ids"])
+    return combine_ids
 
 
 torch.set_printoptions(threshold=10_000)
-
+model = ChameleonForConditionalGeneration.from_pretrained(
+    "leloy/Anole-7b-v0.1-hf",
+    torch_dtype=torch.bfloat16,
+    low_cpu_mem_usage=True,
+    attn_implementation="flash_attention_2",
+    device_map="auto",
+    token=os.environ.get("HF_TOKEN"),
+)
 processor = ChameleonProcessor.from_pretrained(
     "leloy/Anole-7b-v0.1-hf",
     token=os.environ.get("HF_TOKEN"),
@@ -54,33 +62,53 @@ processor = ChameleonProcessor.from_pretrained(
 os.makedirs("./output_tokens",exist_ok=True)
 
 for dataset in ['vist']:
-    processed_data = get_question_anser_dataset(dataset)
-    for d in tqdm(processed_data[:5]):
+    processed_data = get_question_answer_dpo_dataset(dataset,"gpt_flux_results","anole_select_gpt")
+    tokens = []
+    for d in tqdm(processed_data):
         id = d['id']
+
         question = d['question_text']
-        question_answer = d['question_anwer_text']
+        answer1 = d['answer1_text']
+        answer2 = d['answer2_text']
+
         question_images = d['question_images']
-        question_anwer_images = d['question_anwer_images']
+        answer1_images = d['answer1_images']
+        answer2_images = d['answer2_images']
         
         question_token = tokenization(
             prompt=question,
             image_paths=question_images
         )
-        
-        question_answer_token = tokenization(
-            prompt=question_answer,
-            image_paths=question_anwer_images
+
+        answer1_token = tokenization(
+            prompt=answer1,
+            image_paths=answer1_images
         )
 
-        d["question_token"] = question_token
-        d["question_answer_token"] = question_answer_token
+        answer2_token = tokenization(
+            prompt=answer2,
+            image_paths=answer2_images
+        )
+
+        d["question_token"] = question_token.tolist()[0]
+        d["answer1_token"] = answer1_token.tolist()[0]
+        d["answer2_token"] = answer2_token.tolist()[0]
+
         d.pop('question_text')
-        d.pop('question_anwer_text')
+        d.pop('answer1_text')
+        d.pop('answer2_text')
         d.pop('question_images')
-        d.pop('question_anwer_images')
+        d.pop('answer1_images')
+        d.pop('answer2_images')
 
-        with open(f'./output_tokens/tokenization.json','w') as f:
-            json.dump(processed_data, f, indent=4)
-
-    with open(f'./output_tokens/tokenization.json','w') as f:
-        json.dump(processed_data, f, indent=4)
+        tokens.append(
+            {
+                "question": d["question_token"],
+                "selected": d["answer1_token"],
+                "rejected": d["answer2_token"]
+            }
+        )
+        with open('./output_tokens/dpo_token_gptf_anole.json','w') as f:
+            json.dump(tokens, f)
+    with open('./output_tokens/dpo_token_gptf_anole.json','w') as f:
+        json.dump(tokens, f)
